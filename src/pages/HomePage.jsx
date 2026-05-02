@@ -14,6 +14,14 @@ const fallbackProductImage = `data:image/svg+xml;utf8,${encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f6e4cf"/><stop offset="1" stop-color="#ead6b8"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#7a6452" font-size="28" font-family="Arial, sans-serif">Hinh anh san pham</text></svg>'
 )}`
 
+function normalizeSearchText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim()
+}
+
 function HomePage() {
     const [products, setProducts] = useState([])
     const [search, setSearch] = useState('')
@@ -45,15 +53,23 @@ function HomePage() {
     }, [])
 
     const categories = useMemo(
-        () => ['all', ...new Set(products.map((item) => item.category))],
+        () => ['all', ...new Set(products.map((item) => item.category).filter(Boolean))],
         [products]
     )
 
     const filteredProducts = useMemo(() => {
-        const normalizedSearch = search.trim().toLowerCase()
+        const normalizedSearch = normalizeSearchText(search)
+
+        if (!normalizedSearch) {
+            return products.filter((item) => category === 'all' || item.category === category)
+        }
+
         return products.filter((item) => {
             const matchCategory = category === 'all' || item.category === category
-            const matchSearch = item.productName.toLowerCase().includes(normalizedSearch)
+            const productName = normalizeSearchText(item.productName)
+            const brand = normalizeSearchText(item.brand)
+            const itemCategory = normalizeSearchText(item.category)
+            const matchSearch = productName.includes(normalizedSearch) || brand.includes(normalizedSearch) || itemCategory.includes(normalizedSearch)
             return matchCategory && matchSearch
         })
     }, [products, category, search])
@@ -61,11 +77,11 @@ function HomePage() {
     return (
         <>
             <section className="hero reveal">
-                <p className="eyebrow">Public Home</p>
-                <h1>Nguồn Thức Ăn Gia Súc Cho Đại Lý Và Hộ Chăn Nuôi</h1>
-                <p className="subtitle">
+                {/* <p className="eyebrow">Public Home</p> */}
+                {/* <h1>Thức Ăn Gia Súc </h1> */}
+                {/* <p className="subtitle">
                     Trang công khai cho người dùng xem sản phẩm. Khu vực Agent và Admin được tách route riêng.
-                </p>
+                </p> */}
             </section>
 
             <section className="toolbar reveal" aria-label="Bộ lọc">

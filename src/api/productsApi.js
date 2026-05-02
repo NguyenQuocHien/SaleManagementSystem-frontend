@@ -75,6 +75,18 @@ export function createProductsApi(apiBaseUrl) {
             }
         },
 
+        async search(query, options = {}) {
+            const params = new URLSearchParams()
+            if (query && query.trim()) {
+                params.append('query', query.trim())
+            }
+            const response = await fetch(`${apiBaseUrl}/api/Products/search?${params.toString()}`, {
+                headers: { Accept: 'application/json' },
+                signal: options.signal,
+            })
+            return parseResponse(response)
+        },
+
         async create(payload) {
             const response = await fetch(`${apiBaseUrl}/api/Products`, {
                 method: 'POST',

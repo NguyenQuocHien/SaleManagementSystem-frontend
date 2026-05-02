@@ -23,6 +23,47 @@ const currencyFormatter = new Intl.NumberFormat('vi-VN', {
     maximumFractionDigits: 0,
 })
 
+const acceptedImageMimeTypes = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'image/bmp',
+    'image/svg+xml',
+])
+
+const acceptedImageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
+
+function isSupportedImageFile(file) {
+    if (!file) {
+        return false
+    }
+
+    if (file.type && acceptedImageMimeTypes.has(file.type.toLowerCase())) {
+        return true
+    }
+
+    const fileName = file.name || ''
+    const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
+    return acceptedImageExtensions.includes(extension)
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+
+        reader.onload = () => {
+            resolve(typeof reader.result === 'string' ? reader.result : '')
+        }
+
+        reader.onerror = () => {
+            reject(new Error('Không thể đọc ảnh đã chọn.'))
+        }
+
+        reader.readAsDataURL(file)
+    })
+}
+
 function formatDate(dateText) {
     if (!dateText) {
         return '-'
@@ -56,19 +97,6 @@ function createDefaultProductForm() {
         imageUrl: '',
         description: '',
         isActive: true,
-    }
-}
-
-function isValidImageUrl(url) {
-    if (!url) {
-        return true
-    }
-
-    try {
-        const parsed = new URL(url)
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-    } catch {
-        return false
     }
 }
 
@@ -138,6 +166,16 @@ function getInventoryTotalQuantity(item) {
     return (bagQuantity * bagWeight) + looseQuantity
 }
 
+function normalizeSearchText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim()
+}
+
+const PRODUCT_PAGE_SIZE = 15
+
 function AgentPortalPage() {
     const [authUser] = useState(() => readAuthUser())
     const [activeTab, setActiveTab] = useState('products')
@@ -158,9 +196,16 @@ function AgentPortalPage() {
     const [productForm, setProductForm] = useState(createDefaultProductForm)
     const [productFormErrors, setProductFormErrors] = useState({})
     const [editingProductId, setEditingProductId] = useState('')
+    const [productViewMode, setProductViewMode] = useState('list')
+    const [productSearchQuery, setProductSearchQuery] = useState('')
+    const [productPage, setProductPage] = useState(1)
+    const [pendingProductImageFile, setPendingProductImageFile] = useState(null)
+    const [productImagePreviewUrl, setProductImagePreviewUrl] = useState('')
 
     const [saleForm, setSaleForm] = useState(createDefaultSaleForm)
     const [receiptForm, setReceiptForm] = useState(createDefaultReceiptForm)
+    const [pendingReceiptImageFile, setPendingReceiptImageFile] = useState(null)
+    const [receiptImagePreviewUrl, setReceiptImagePreviewUrl] = useState('')
     const [inventoryAdjustForm, setInventoryAdjustForm] = useState(createDefaultInventoryAdjustForm)
     const [paymentDrafts, setPaymentDrafts] = useState({})
 
@@ -300,6 +345,36 @@ function AgentPortalPage() {
         return options.length > 0 ? options : ['Chưa phân loại']
     }, [categories, products])
 
+    const filteredProducts = useMemo(() => {
+        const normalizedQuery = normalizeSearchText(productSearchQuery)
+
+        return products.filter((item) => {
+            const matchesQuery = !normalizedQuery
+                || normalizeSearchText(item.productName).includes(normalizedQuery)
+                || normalizeSearchText(item.brand).includes(normalizedQuery)
+                || normalizeSearchText(item.category).includes(normalizedQuery)
+
+            return matchesQuery
+        })
+    }, [products, productSearchQuery])
+
+    const totalProductPages = Math.max(1, Math.ceil(filteredProducts.length / PRODUCT_PAGE_SIZE))
+
+    const pagedProducts = useMemo(() => {
+        const startIndex = (productPage - 1) * PRODUCT_PAGE_SIZE
+        return filteredProducts.slice(startIndex, startIndex + PRODUCT_PAGE_SIZE)
+    }, [filteredProducts, productPage])
+
+    useEffect(() => {
+        setProductPage(1)
+    }, [productSearchQuery])
+
+    useEffect(() => {
+        if (productPage > totalProductPages) {
+            setProductPage(totalProductPages)
+        }
+    }, [productPage, totalProductPages])
+
     const handleProductFormChange = (field, value) => {
         setProductForm((prev) => ({ ...prev, [field]: value }))
         setProductFormErrors((prev) => {
@@ -317,6 +392,14 @@ function AgentPortalPage() {
         setProductForm(createDefaultProductForm())
         setProductFormErrors({})
         setEditingProductId('')
+        setProductViewMode('list')
+        setPendingProductImageFile(null)
+        setProductImagePreviewUrl('')
+    }
+
+    const openProductForm = () => {
+        resetProductForm()
+        setProductViewMode('form')
     }
 
     const handleUploadProductImage = async (event) => {
@@ -327,32 +410,23 @@ function AgentPortalPage() {
             return
         }
 
+        if (!isSupportedImageFile(selectedFile)) {
+            setPageError('Chỉ hỗ trợ file ảnh: JPG, PNG, WEBP, GIF, BMP, SVG.')
+            return
+        }
+
         clearMessages()
 
         try {
-            setBusyAction('upload-product-image')
-            const result = await uploadsApi.uploadImage(selectedFile, 'products')
-            const uploadedUrl = typeof result === 'string' ? result : result?.url
-
-            if (!uploadedUrl) {
-                throw new Error('Upload thành công nhưng không nhận được URL ảnh.')
+            const localPreview = await readFileAsDataUrl(selectedFile)
+            if (localPreview) {
+                setProductImagePreviewUrl(localPreview)
             }
 
-            setProductForm((prev) => ({ ...prev, imageUrl: uploadedUrl }))
-            setProductFormErrors((prev) => {
-                if (!prev.imageUrl) {
-                    return prev
-                }
-
-                const next = { ...prev }
-                delete next.imageUrl
-                return next
-            })
-            setPageNotice('Đã tải ảnh sản phẩm lên Filebase.')
+            setPendingProductImageFile(selectedFile)
+            setPageNotice('Đã chọn ảnh sản phẩm. Ảnh sẽ được tải lên Filebase khi bấm lưu.')
         } catch (error) {
-            setPageError(error?.message || 'Không thể tải ảnh sản phẩm lên Filebase.')
-        } finally {
-            setBusyAction('')
+            setPageError(error?.message || 'Không thể đọc ảnh sản phẩm đã chọn.')
         }
     }
 
@@ -364,23 +438,23 @@ function AgentPortalPage() {
             return
         }
 
+        if (!isSupportedImageFile(selectedFile)) {
+            setPageError('Chỉ hỗ trợ file ảnh: JPG, PNG, WEBP, GIF, BMP, SVG.')
+            return
+        }
+
         clearMessages()
 
         try {
-            setBusyAction('upload-receipt-image')
-            const result = await uploadsApi.uploadImage(selectedFile, 'import-receipts')
-            const uploadedUrl = typeof result === 'string' ? result : result?.url
-
-            if (!uploadedUrl) {
-                throw new Error('Upload thành công nhưng không nhận được URL ảnh.')
+            const localPreview = await readFileAsDataUrl(selectedFile)
+            if (localPreview) {
+                setReceiptImagePreviewUrl(localPreview)
             }
 
-            setReceiptForm((prev) => ({ ...prev, imageUrl: uploadedUrl }))
-            setPageNotice('Đã tải ảnh lô nhập lên Filebase.')
+            setPendingReceiptImageFile(selectedFile)
+            setPageNotice('Đã chọn ảnh lô nhập. Ảnh sẽ được tải lên Filebase khi bấm lưu.')
         } catch (error) {
-            setPageError(error?.message || 'Không thể tải ảnh lô nhập lên Filebase.')
-        } finally {
-            setBusyAction('')
+            setPageError(error?.message || 'Không thể đọc ảnh lô nhập đã chọn.')
         }
     }
 
@@ -412,16 +486,32 @@ function AgentPortalPage() {
             formErrors.unitPrice = 'Đơn giá phải lớn hơn 0.'
         }
 
-        if (!isValidImageUrl(productForm.imageUrl.trim())) {
-            formErrors.imageUrl = 'URL ảnh không hợp lệ. Vui lòng nhập link bắt đầu bằng http:// hoặc https://.'
-        }
-
         if (Object.keys(formErrors).length > 0) {
             setProductFormErrors(formErrors)
             return
         }
 
         setProductFormErrors({})
+
+        let uploadedImageUrl = productForm.imageUrl.trim() || null
+
+        if (pendingProductImageFile) {
+            try {
+                setBusyAction('upload-product-image')
+                const result = await uploadsApi.uploadImage(pendingProductImageFile)
+                uploadedImageUrl = typeof result === 'string'
+                    ? result
+                    : result?.url || result?.Url || null
+
+                if (!uploadedImageUrl) {
+                    throw new Error('Upload thành công nhưng không nhận được URL ảnh.')
+                }
+            } catch (error) {
+                setPageError(error?.message || 'Không thể tải ảnh sản phẩm lên Filebase.')
+                setBusyAction('')
+                return
+            }
+        }
 
         const payload = {
             productName: productForm.productName.trim(),
@@ -430,12 +520,14 @@ function AgentPortalPage() {
             unit: productForm.unit.trim(),
             weight,
             unitPrice,
-            imageUrl: productForm.imageUrl.trim() || null,
+            imageUrl: uploadedImageUrl,
             description: productForm.description.trim() || null,
         }
 
         try {
-            setBusyAction('save-product')
+            if (!pendingProductImageFile) {
+                setBusyAction('save-product')
+            }
 
             if (editingProductId) {
                 await productsApi.update(editingProductId, {
@@ -460,11 +552,14 @@ function AgentPortalPage() {
             }
         } finally {
             setBusyAction('')
+            setPendingProductImageFile(null)
         }
     }
 
     const handleEditProduct = (product) => {
         setEditingProductId(product.productId)
+        setProductViewMode('form')
+        setPendingProductImageFile(null)
         setProductForm({
             productName: product.productName || '',
             brand: product.brand || '',
@@ -476,6 +571,7 @@ function AgentPortalPage() {
             description: product.description || '',
             isActive: Boolean(product.isActive),
         })
+        setProductImagePreviewUrl(product.imageUrl || '')
     }
 
     const handleDeleteProduct = async (product) => {
@@ -589,9 +685,24 @@ function AgentPortalPage() {
             return
         }
 
-        if (!isValidImageUrl(receiptForm.imageUrl.trim())) {
-            setPageError('URL ảnh phiếu nhập không hợp lệ. Vui lòng nhập link bắt đầu bằng http:// hoặc https://, hoặc để trống.')
-            return
+        let uploadedImageUrl = receiptForm.imageUrl.trim() || null
+
+        if (pendingReceiptImageFile) {
+            try {
+                setBusyAction('upload-receipt-image')
+                const result = await uploadsApi.uploadImage(pendingReceiptImageFile)
+                uploadedImageUrl = typeof result === 'string'
+                    ? result
+                    : result?.url || result?.Url || null
+
+                if (!uploadedImageUrl) {
+                    throw new Error('Upload thành công nhưng không nhận được URL ảnh.')
+                }
+            } catch (error) {
+                setPageError(error?.message || 'Không thể tải ảnh lô nhập lên Filebase.')
+                setBusyAction('')
+                return
+            }
         }
 
         const bagWeight = Number(selectedReceiptProduct?.weight) || 0
@@ -616,7 +727,7 @@ function AgentPortalPage() {
                     warehouseLocation: receiptForm.warehouseLocation.trim(),
                     bagWeight,
                     costPrice,
-                    imageUrl: receiptForm.imageUrl.trim() || null,
+                    imageUrl: uploadedImageUrl,
                     bagQuantity,
                     looseQuantity,
                     reorderLevel,
@@ -627,15 +738,20 @@ function AgentPortalPage() {
         }
 
         try {
-            setBusyAction('create-receipt')
+            if (!pendingReceiptImageFile) {
+                setBusyAction('create-receipt')
+            }
             await importReceiptsApi.create(payload)
             setReceiptForm(createDefaultReceiptForm())
+            setPendingReceiptImageFile(null)
+            setReceiptImagePreviewUrl('')
             setPageNotice('Đã tạo phiếu nhập kho thành công.')
             await loadPortalData({ preserveMessages: true, showGlobalLoading: false })
         } catch (error) {
             setPageError(error?.message || 'Không thể tạo phiếu nhập kho.')
         } finally {
             setBusyAction('')
+            setPendingReceiptImageFile(null)
         }
     }
 
@@ -700,13 +816,13 @@ function AgentPortalPage() {
         <section className="agent-shell">
             <div className="agent-head">
 
-                <h1>Quản trị nghiệp vụ đại lý</h1>
+                {/* <h1>Quản trị nghiệp vụ đại lý</h1> */}
 
-                <div className="agent-head-actions">
+                {/* <div className="agent-head-actions">
                     <button type="button" className="action-btn" onClick={() => loadPortalData()}>
                         Làm mới dữ liệu
                     </button>
-                </div>
+                </div> */}
 
                 <div className="agent-tabs" role="tablist" aria-label="Chức năng Agent">
                     <button
@@ -729,6 +845,13 @@ function AgentPortalPage() {
                         onClick={() => setActiveTab('debt')}
                     >
                         Quản lý công nợ
+                    </button>
+                    <button
+                        type="button"
+                        className={`agent-tab ${activeTab === 'sales' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('sales')}
+                    >
+                        Tạo hóa đơn bán hàng
                     </button>
                     <button
                         type="button"
@@ -756,205 +879,243 @@ function AgentPortalPage() {
 
                     {activeTab === 'products' ? (
                         <div className="agent-block">
-                            <div className="agent-section-title">
-
-                                {editingProductId ? (
-                                    <button type="button" className="soft-btn" onClick={resetProductForm}>
-                                        Hủy chỉnh sửa
-                                    </button>
-                                ) : null}
+                            <div className="agent-section-title product-section-head">
+                                <h2>{productViewMode === 'form' ? 'Thêm / Sửa sản phẩm' : 'Danh sách sản phẩm'}</h2>
+                                <button
+                                    type="button"
+                                    className="soft-btn"
+                                    onClick={productViewMode === 'form' ? resetProductForm : openProductForm}
+                                >
+                                    {productViewMode === 'form' ? 'Xem danh sách' : 'Thêm sản phẩm'}
+                                </button>
                             </div>
 
-                            <form className="agent-form" onSubmit={handleSubmitProduct}>
-                                <label>
-                                    Tên sản phẩm
-                                    <input
-                                        value={productForm.productName}
-                                        onChange={(event) => handleProductFormChange('productName', event.target.value)}
-                                        placeholder="Ví dụ: Cám heo tăng trọng"
-                                    />
-                                    {productFormErrors.productName ? <p className="form-field-error">{productFormErrors.productName}</p> : null}
-                                </label>
-
-                                <label>
-                                    Thương hiệu
-                                    <input
-                                        value={productForm.brand}
-                                        onChange={(event) => handleProductFormChange('brand', event.target.value)}
-                                        placeholder="Ví dụ: Anco"
-                                    />
-                                </label>
-
-                                <label>
-                                    Danh mục
-                                    <select
-                                        value={productForm.category}
-                                        onChange={(event) => handleProductFormChange('category', event.target.value)}
-                                    >
-                                        <option value="">Chọn danh mục</option>
-                                        {categoryOptions.map((item) => (
-                                            <option key={item} value={item}>{item}</option>
-                                        ))}
-                                    </select>
-                                    {productFormErrors.category ? <p className="form-field-error">{productFormErrors.category}</p> : null}
-                                </label>
-
-                                <label>
-                                    Đơn vị
-                                    <input
-                                        value={productForm.unit}
-                                        onChange={(event) => handleProductFormChange('unit', event.target.value)}
-                                        placeholder="Ví dụ: bao, kg"
-                                    />
-                                    {productFormErrors.unit ? <p className="form-field-error">{productFormErrors.unit}</p> : null}
-                                </label>
-
-                                <label>
-                                    Trọng lượng (kg/bao)
-                                    <input
-                                        type="number"
-                                        min="0.01"
-                                        step="0.01"
-                                        value={productForm.weight}
-                                        onChange={(event) => handleProductFormChange('weight', event.target.value)}
-                                        placeholder="Ví dụ: 25 hoặc 40"
-                                    />
-                                    {productFormErrors.weight ? <p className="form-field-error">{productFormErrors.weight}</p> : null}
-                                </label>
-
-                                <label>
-                                    Giá bán
-                                    <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        value={productForm.unitPrice}
-                                        onChange={(event) => handleProductFormChange('unitPrice', normalizeVndInput(event.target.value))}
-                                        placeholder="Ví dụ: 540000 hoặc 540.000"
-                                    />
-                                    {productFormErrors.unitPrice ? <p className="form-field-error">{productFormErrors.unitPrice}</p> : null}
-                                </label>
-
-                                <label className="full">
-                                    URL ảnh sản phẩm
-                                    <input
-                                        value={productForm.imageUrl}
-                                        onChange={(event) => handleProductFormChange('imageUrl', event.target.value)}
-                                        placeholder="https://..."
-                                    />
-                                    {productFormErrors.imageUrl ? <p className="form-field-error">{productFormErrors.imageUrl}</p> : null}
-                                </label>
-
-                                <label className="full">
-                                    Hoặc tải ảnh từ máy lên Filebase
-                                    <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={handleUploadProductImage}
-                                        disabled={busyAction === 'upload-product-image'}
-                                    />
-                                </label>
-
-                                <label className="full">
-                                    Mô tả
-                                    <textarea
-                                        rows="2"
-                                        value={productForm.description}
-                                        onChange={(event) => handleProductFormChange('description', event.target.value)}
-                                        placeholder="Thông tin mô tả sản phẩm"
-                                    />
-                                </label>
-
-                                {editingProductId ? (
-                                    <label className="checkbox full">
+                            {productViewMode === 'form' ? (
+                                <form className="agent-form" onSubmit={handleSubmitProduct}>
+                                    <label>
+                                        Tên sản phẩm
                                         <input
-                                            type="checkbox"
-                                            checked={productForm.isActive}
-                                            onChange={(event) => handleProductFormChange('isActive', event.target.checked)}
+                                            value={productForm.productName}
+                                            onChange={(event) => handleProductFormChange('productName', event.target.value)}
+                                            placeholder="Ví dụ: Cám heo tăng trọng"
                                         />
-                                        Trạng thái hoạt động
+                                        {productFormErrors.productName ? <p className="form-field-error">{productFormErrors.productName}</p> : null}
                                     </label>
-                                ) : null}
 
-                                <div className="agent-form-actions full">
-                                    <button type="submit" className="action-btn" disabled={busyAction === 'save-product' || busyAction === 'upload-product-image'}>
-                                        {busyAction === 'save-product'
-                                            ? 'Đang lưu...'
-                                            : busyAction === 'upload-product-image'
-                                                ? 'Đang tải ảnh...'
-                                                : editingProductId
-                                                    ? 'Cập nhật sản phẩm'
-                                                    : 'Tạo sản phẩm'}
-                                    </button>
-                                </div>
+                                    <label>
+                                        Thương hiệu
+                                        <input
+                                            value={productForm.brand}
+                                            onChange={(event) => handleProductFormChange('brand', event.target.value)}
+                                            placeholder="Ví dụ: Anco"
+                                        />
+                                    </label>
 
-                                {pageError ? <p className="agent-feedback error">{pageError}</p> : null}
-                                {pageNotice ? <p className="agent-feedback notice">{pageNotice}</p> : null}
+                                    <label>
+                                        Danh mục
+                                        <select
+                                            value={productForm.category}
+                                            onChange={(event) => handleProductFormChange('category', event.target.value)}
+                                        >
+                                            <option value="">Chọn danh mục</option>
+                                            {categoryOptions.map((item) => (
+                                                <option key={item} value={item}>{item}</option>
+                                            ))}
+                                        </select>
+                                        {productFormErrors.category ? <p className="form-field-error">{productFormErrors.category}</p> : null}
+                                    </label>
 
-                            </form>
+                                    <label>
+                                        Đơn vị
+                                        <input
+                                            value={productForm.unit}
+                                            onChange={(event) => handleProductFormChange('unit', event.target.value)}
+                                            placeholder="Ví dụ: bao, kg"
+                                        />
+                                        {productFormErrors.unit ? <p className="form-field-error">{productFormErrors.unit}</p> : null}
+                                    </label>
 
-                            <div className="table-wrap compact">
-                                <table className="agent-table">
-                                    <thead>
+                                    <label>
+                                        Trọng lượng (kg)
+                                        <input
+                                            type="number"
+                                            min="0.01"
+                                            step="0.01"
+                                            value={productForm.weight}
+                                            onChange={(event) => handleProductFormChange('weight', event.target.value)}
+                                            placeholder="Ví dụ: 25 hoặc 40"
+                                        />
+                                        {productFormErrors.weight ? <p className="form-field-error">{productFormErrors.weight}</p> : null}
+                                    </label>
 
-                                        <tr>
-                                            <th>Danh mục</th>
-                                            <th>Tên sản phẩm</th>
-                                            {/* <th>Thương hiệu</th> */}
+                                    <label>
+                                        Giá bán
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={productForm.unitPrice}
+                                            onChange={(event) => handleProductFormChange('unitPrice', normalizeVndInput(event.target.value))}
+                                            placeholder="Ví dụ: 540000 hoặc 540.000"
+                                        />
+                                        {productFormErrors.unitPrice ? <p className="form-field-error">{productFormErrors.unitPrice}</p> : null}
+                                    </label>
 
-                                            <th>Trọng lượng</th>
-                                            {/* <th>Đơn vị</th> */}
-                                            <th>Giá bán</th>
-                                            <th>Ảnh</th>
-                                            <th>Trạng thái</th>
-                                            <th>Hành động</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {products.length === 0 ? (
-                                            <tr>
-                                                <td colSpan="9" className="agent-empty-cell">Chưa có sản phẩm nào.</td>
-                                            </tr>
-                                        ) : (
-                                            products.map((item) => (
-                                                <tr key={item.productId}>
-                                                    <td>{item.category}</td>
-                                                    <td>{item.productName}</td>
-                                                    {/* <td>{item.brand || '-'}</td> */}
+                                    <label className="full">
+                                        Chọn ảnh sản phẩm
+                                        <input
+                                            type="file"
+                                            accept=".jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,image/jpeg,image/png,image/webp,image/gif,image/bmp,image/svg+xml"
+                                            onChange={handleUploadProductImage}
+                                            disabled={busyAction === 'upload-product-image'}
+                                        />
+                                    </label>
 
-                                                    <td>{Number(item.weight || 0).toFixed(2)} kg</td>
-                                                    {/* <td>{item.unit}</td> */}
-                                                    <td>{currencyFormatter.format(Number(item.unitPrice) || 0)}</td>
-                                                    <td>{item.imageUrl ? 'Có ảnh' : 'Chưa có'}</td>
-                                                    <td>
-                                                        <span className={`status-pill ${item.isActive ? 'active' : 'banned'}`}>
-                                                            {item.isActive ? 'Đang bán' : 'Ngừng bán'}
-                                                        </span>
-                                                    </td>
-                                                    <td>
-                                                        <div className="row-actions">
-                                                            <button
-                                                                type="button"
-                                                                className="mini-btn"
-                                                                onClick={() => handleEditProduct(item)}
-                                                            >
-                                                                Sửa
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="mini-btn danger"
-                                                                onClick={() => handleDeleteProduct(item)}
-                                                                disabled={busyAction === `delete-${item.productId}`}
-                                                            >
-                                                                {busyAction === `delete-${item.productId}` ? 'Đang xóa...' : 'Xóa'}
-                                                            </button>
-                                                        </div>
-                                                    </td>
+                                    {pendingProductImageFile ? (
+                                        <p className="form-field-note full">
+                                            Ảnh đã chọn, sẽ được tải lên Filebase khi bấm lưu.
+                                        </p>
+                                    ) : null}
+
+                                    {productImagePreviewUrl ? (
+                                        <div className="image-preview-card full">
+                                            <img
+                                                src={productImagePreviewUrl}
+                                                alt="Xem trước ảnh sản phẩm"
+                                                className="image-preview-image"
+                                            />
+                                        </div>
+                                    ) : null}
+
+                                    <label className="full">
+                                        Mô tả
+                                        <textarea
+                                            rows="2"
+                                            value={productForm.description}
+                                            onChange={(event) => handleProductFormChange('description', event.target.value)}
+                                            placeholder="Thông tin mô tả sản phẩm"
+                                        />
+                                    </label>
+
+                                    {editingProductId ? (
+                                        <label className="checkbox full">
+                                            <input
+                                                type="checkbox"
+                                                checked={productForm.isActive}
+                                                onChange={(event) => handleProductFormChange('isActive', event.target.checked)}
+                                            />
+                                            Trạng thái hoạt động
+                                        </label>
+                                    ) : null}
+
+                                    <div className="agent-form-actions full">
+                                        <button type="submit" className="action-btn" disabled={busyAction === 'save-product' || busyAction === 'upload-product-image'}>
+                                            {busyAction === 'save-product'
+                                                ? 'Đang lưu...'
+                                                : busyAction === 'upload-product-image'
+                                                    ? 'Đang tải ảnh...'
+                                                    : editingProductId
+                                                        ? 'Cập nhật sản phẩm'
+                                                        : 'Tạo sản phẩm'}
+                                        </button>
+                                        {editingProductId ? (
+                                            <button type="button" className="soft-btn" onClick={resetProductForm}>
+                                                Hủy chỉnh sửa
+                                            </button>
+                                        ) : null}
+                                    </div>
+
+                                    {pageError ? <p className="agent-feedback error">{pageError}</p> : null}
+                                    {pageNotice ? <p className="agent-feedback notice">{pageNotice}</p> : null}
+
+                                </form>
+                            ) : (
+                                <>
+                                    <div className="product-search-bar">
+                                        <input
+                                            type="text"
+                                            className="product-search-input"
+                                            placeholder="Tìm kiếm sản phẩm theo tên, thương hiệu hoặc danh mục..."
+                                            value={productSearchQuery}
+                                            onChange={(event) => setProductSearchQuery(event.target.value)}
+                                        />
+                                    </div>
+                                    <div className="table-wrap compact">
+                                        <table className="agent-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Danh mục</th>
+                                                    <th>Tên sản phẩm</th>
+                                                    {/* <th>Thương hiệu</th> */}
+                                                    <th>Trọng lượng</th>
+                                                    {/* <th>Đơn vị</th> */}
+                                                    <th>Giá bán</th>
+                                                    <th>Ảnh</th>
+                                                    <th>Trạng thái</th>
+                                                    <th>Hành động</th>
                                                 </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
+                                            </thead>
+                                            <tbody>
+                                                {filteredProducts.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan="9" className="agent-empty-cell">{productSearchQuery.trim() ? 'Không tìm thấy sản phẩm nào.' : 'Chưa có sản phẩm nào.'}</td>
+                                                    </tr>
+                                                ) : (
+                                                    pagedProducts.map((item) => (
+                                                        <tr key={item.productId}>
+                                                            <td>{item.category}</td>
+                                                            <td>{item.productName}</td>
+                                                            {/* <td>{item.brand || '-'}</td> */}
+                                                            <td>{Number(item.weight || 0).toFixed(2)} kg</td>
+                                                            {/* <td>{item.unit}</td> */}
+                                                            <td>{currencyFormatter.format(Number(item.unitPrice) || 0)}</td>
+                                                            <td>{item.imageUrl ? 'Có ảnh' : 'Chưa có'}</td>
+                                                            <td>
+                                                                <span className={`status-pill ${item.isActive ? 'active' : 'banned'}`}>
+                                                                    {item.isActive ? 'Đang bán' : 'Ngừng bán'}
+                                                                </span>
+                                                            </td>
+                                                            <td>
+                                                                <div className="row-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="mini-btn"
+                                                                        onClick={() => handleEditProduct(item)}
+                                                                    >
+                                                                        Sửa
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="mini-btn danger"
+                                                                        onClick={() => handleDeleteProduct(item)}
+                                                                        disabled={busyAction === `delete-${item.productId}`}
+                                                                    >
+                                                                        {busyAction === `delete-${item.productId}` ? 'Đang xóa...' : 'Xóa'}
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {filteredProducts.length > PRODUCT_PAGE_SIZE ? (
+                                        <div className="pagination-bar" aria-label="Phân trang sản phẩm">
+                                            {Array.from({ length: totalProductPages }, (_, index) => index + 1).map((pageNumber) => (
+                                                <button
+                                                    key={pageNumber}
+                                                    type="button"
+                                                    className={`soft-btn pagination-btn ${productPage === pageNumber ? 'active' : ''}`}
+                                                    onClick={() => setProductPage(pageNumber)}
+                                                    aria-current={productPage === pageNumber ? 'page' : undefined}
+                                                >
+                                                    {pageNumber}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </>
+                            )}
                         </div>
                     ) : null}
 
@@ -1217,8 +1378,8 @@ function AgentPortalPage() {
                         </>
                     ) : null}
 
-                    {activeTab === 'documents' ? (
-                        <>
+                    {activeTab === 'sales' ? (
+                        <div className="agent-block">
                             <div className="debt-panels">
                                 <article className="debt-panel">
                                     <h3>Tạo hóa đơn bán hàng</h3>
@@ -1311,158 +1472,6 @@ function AgentPortalPage() {
                                         </div>
                                     </form>
                                 </article>
-
-                                <article className="debt-panel">
-                                    <h3>Tạo phiếu nhập kho</h3>
-                                    <p className="meta-line">Nhập một dòng sản phẩm để cập nhật tồn kho theo phiếu nhập.</p>
-
-                                    <form className="agent-form" onSubmit={handleCreateReceipt}>
-                                        <label>
-                                            Sản phẩm
-                                            <select
-                                                value={receiptForm.productId}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, productId: event.target.value }))}
-                                            >
-                                                <option value="">Chọn sản phẩm</option>
-                                                {products.map((item) => (
-                                                    <option key={item.productId} value={item.productId}>
-                                                        {item.productName}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
-
-                                        <label>
-                                            Nhà cung cấp
-                                            <input
-                                                value={receiptForm.supplierName}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, supplierName: event.target.value }))}
-                                                placeholder="Tên nhà cung cấp"
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Vị trí kho
-                                            <input
-                                                value={receiptForm.warehouseLocation}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, warehouseLocation: event.target.value }))}
-                                                placeholder="Ví dụ: Kho A - Kệ 01"
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Trọng lượng bao (kg)
-                                            <input
-                                                type="number"
-                                                min="0.01"
-                                                step="0.01"
-                                                value={selectedReceiptProduct ? Number(selectedReceiptProduct.weight || 0).toFixed(2) : ''}
-                                                readOnly
-                                                placeholder="Lấy theo sản phẩm"
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Giá vốn
-                                            <input
-                                                type="text"
-                                                inputMode="numeric"
-                                                value={receiptForm.costPrice}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, costPrice: normalizeVndInput(event.target.value) }))}
-                                                placeholder="Ví dụ: 320000 hoặc 320.000"
-                                            />
-                                        </label>
-
-                                        <label>
-                                            URL ảnh lô nhập (tuỳ chọn)
-                                            <input
-                                                value={receiptForm.imageUrl}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, imageUrl: event.target.value }))}
-                                                placeholder="https://..."
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Hoặc tải ảnh từ máy lên Filebase
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                onChange={handleUploadReceiptImage}
-                                                disabled={busyAction === 'upload-receipt-image'}
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Số bao
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="1"
-                                                value={receiptForm.bagQuantity}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, bagQuantity: event.target.value }))}
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Số lượng lẻ (kg)
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="0.01"
-                                                value={receiptForm.looseQuantity}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, looseQuantity: event.target.value }))}
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Mức tái nhập
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                step="0.01"
-                                                value={receiptForm.reorderLevel}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, reorderLevel: event.target.value }))}
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Ngày sản xuất
-                                            <input
-                                                type="date"
-                                                value={receiptForm.manufactureDate}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, manufactureDate: event.target.value }))}
-                                            />
-                                        </label>
-
-                                        <label>
-                                            Hạn sử dụng
-                                            <input
-                                                type="date"
-                                                value={receiptForm.expiryDate}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, expiryDate: event.target.value }))}
-                                            />
-                                        </label>
-
-                                        <label className="full">
-                                            Ghi chú phiếu nhập
-                                            <input
-                                                value={receiptForm.notes}
-                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, notes: event.target.value }))}
-                                                placeholder="Ghi chú bổ sung"
-                                            />
-                                        </label>
-
-                                        <div className="agent-form-actions full">
-                                            <button type="submit" className="action-btn" disabled={busyAction === 'create-receipt' || busyAction === 'upload-receipt-image'}>
-                                                {busyAction === 'create-receipt'
-                                                    ? 'Đang tạo...'
-                                                    : busyAction === 'upload-receipt-image'
-                                                        ? 'Đang tải ảnh...'
-                                                        : 'Tạo phiếu nhập'}
-                                            </button>
-                                        </div>
-                                    </form>
-                                </article>
                             </div>
 
                             <div className="agent-block">
@@ -1500,6 +1509,188 @@ function AgentPortalPage() {
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {activeTab === 'documents' ? (
+                        <>
+                            <div className="debt-panels">
+                                <article className="debt-panel">
+                                    <h3>Tạo phiếu nhập kho</h3>
+                                    {/* <p className="meta-line">Nhập sản phẩm để cập nhật tồn kho theo phiếu nhập.</p> */}
+
+                                    <form className="agent-form" onSubmit={handleCreateReceipt}>
+                                        <div className="form-grid">
+                                            <label>
+                                                Nhà cung cấp
+                                                <input
+                                                    value={receiptForm.supplierName}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, supplierName: event.target.value }))}
+                                                    placeholder="Tên nhà cung cấp (tùy chọn)"
+                                                />
+                                            </label>
+
+                                            <label>
+                                                Sản phẩm
+                                                <select
+                                                    value={receiptForm.productId}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, productId: event.target.value }))}
+                                                >
+                                                    <option value="">Chọn sản phẩm</option>
+                                                    {products.map((item) => (
+                                                        <option key={item.productId} value={item.productId}>
+                                                            {item.productName}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </label>
+
+                                            <label>
+                                                Trọng lượng bao (kg)
+                                                <input
+                                                    type="number"
+                                                    min="0.01"
+                                                    step="0.01"
+                                                    value={selectedReceiptProduct ? Number(selectedReceiptProduct.weight || 0).toFixed(2) : ''}
+                                                    readOnly
+                                                    placeholder="Lấy theo sản phẩm"
+                                                    style={{ background: '#f5f5f5' }}
+                                                />
+                                            </label>
+                                        </div>
+
+                                        <div className="form-grid">
+                                            <label>
+                                                Vị trí kho
+                                                <input
+                                                    value={receiptForm.warehouseLocation}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, warehouseLocation: event.target.value }))}
+                                                    placeholder="Ví dụ: Kho A - Kệ 01"
+                                                />
+                                            </label>
+
+                                            <label>
+                                                Số bao
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="1"
+                                                    value={receiptForm.bagQuantity}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, bagQuantity: event.target.value }))}
+                                                    placeholder="0"
+                                                />
+                                            </label>
+
+                                            <label>
+                                                Số lượng lẻ (kg)
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={receiptForm.looseQuantity}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, looseQuantity: event.target.value }))}
+                                                    placeholder="0.00"
+                                                />
+                                            </label>
+                                        </div>
+
+                                        <div className="form-grid">
+                                            <label>
+                                                Giá vốn
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={receiptForm.costPrice}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, costPrice: normalizeVndInput(event.target.value) }))}
+                                                    placeholder="Ví dụ: 320000"
+                                                />
+                                            </label>
+
+                                            <label>
+                                                Mức tái nhập (kg)
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={receiptForm.reorderLevel}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, reorderLevel: event.target.value }))}
+                                                    placeholder="0.00"
+                                                />
+                                            </label>
+
+                                            <label>
+                                                Ngày sản xuất
+                                                <input
+                                                    type="date"
+                                                    value={receiptForm.manufactureDate}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, manufactureDate: event.target.value }))}
+                                                />
+                                            </label>
+
+                                            <label>
+                                                Hạn sử dụng
+                                                <input
+                                                    type="date"
+                                                    value={receiptForm.expiryDate}
+                                                    onChange={(event) => setReceiptForm((prev) => ({ ...prev, expiryDate: event.target.value }))}
+                                                />
+                                            </label>
+                                        </div>
+
+                                        <div style={{ marginBottom: 20 }}>
+                                            <label className="full">
+                                                Tải ảnh từ máy lên Filebase
+                                                <input
+                                                    type="file"
+                                                    accept=".jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,image/jpeg,image/png,image/webp,image/gif,image/bmp,image/svg+xml"
+                                                    onChange={handleUploadReceiptImage}
+                                                    disabled={busyAction === 'upload-receipt-image'}
+                                                    style={{ cursor: busyAction === 'upload-receipt-image' ? 'not-allowed' : 'pointer' }}
+                                                />
+                                            </label>
+
+                                            {pendingReceiptImageFile ? (
+                                                <p className="form-field-note full">
+                                                    ✓ Ảnh đã chọn: {pendingReceiptImageFile.name}
+                                                </p>
+                                            ) : null}
+
+                                            {receiptImagePreviewUrl ? (
+                                                <div className="image-preview-card full">
+                                                    <p className="image-preview-meta">Xem trước ảnh lô nhập</p>
+                                                    <img
+                                                        src={receiptImagePreviewUrl}
+                                                        alt="Xem trước ảnh lô nhập"
+                                                        className="image-preview-image"
+                                                        style={{ maxHeight: 250, objectFit: 'contain' }}
+                                                    />
+                                                </div>
+                                            ) : null}
+                                        </div>
+
+                                        <label className="full">
+                                            Ghi chú phiếu nhập
+                                            <textarea
+                                                value={receiptForm.notes}
+                                                onChange={(event) => setReceiptForm((prev) => ({ ...prev, notes: event.target.value }))}
+                                                placeholder="Ghi chú bổ sung (tùy chọn)"
+                                                rows="2"
+                                                style={{ resize: 'vertical' }}
+                                            />
+                                        </label>
+
+                                        <div className="agent-form-actions full" style={{ marginTop: 20 }}>
+                                            <button type="submit" className="action-btn" disabled={busyAction === 'create-receipt' || busyAction === 'upload-receipt-image'}>
+                                                {busyAction === 'create-receipt'
+                                                    ? 'Đang tạo...'
+                                                    : busyAction === 'upload-receipt-image'
+                                                        ? 'Đang tải ảnh...'
+                                                        : '✓ Tạo phiếu nhập'}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </article>
                             </div>
 
                             <div className="agent-block">

@@ -50,12 +50,25 @@ async function parseResponse(response) {
 
 export function createUploadsApi(apiBaseUrl) {
     return {
-        async uploadImage(file, folder = 'images') {
+        async uploadImage(file) {
             const formData = new FormData()
             formData.append('file', file)
-            formData.append('folder', folder)
 
-            const response = await fetch(`${apiBaseUrl}/api/Uploads/image`, {
+            const response = await fetch(`${apiBaseUrl}/api/Images/upload`, {
+                method: 'POST',
+                body: formData,
+            })
+
+            return parseResponse(response)
+        },
+
+        async uploadMultipleImages(files) {
+            const formData = new FormData()
+            for (const file of files) {
+                formData.append('files', file)
+            }
+
+            const response = await fetch(`${apiBaseUrl}/api/Images/upload-multiple`, {
                 method: 'POST',
                 body: formData,
             })
