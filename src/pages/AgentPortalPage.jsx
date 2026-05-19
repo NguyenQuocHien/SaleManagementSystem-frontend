@@ -1043,13 +1043,13 @@ function AgentPortalPage() {
                                         <table className="agent-table">
                                             <thead>
                                                 <tr>
-                                                    <th>Danh mục</th>
+                                                    {/* <th>Danh mục</th> */}
                                                     <th>Tên sản phẩm</th>
                                                     {/* <th>Thương hiệu</th> */}
                                                     <th>Trọng lượng</th>
                                                     {/* <th>Đơn vị</th> */}
                                                     <th>Giá bán</th>
-                                                    <th>Ảnh</th>
+                                                    {/* <th>Ảnh</th> */}
                                                     <th>Trạng thái</th>
                                                     <th>Hành động</th>
                                                 </tr>
@@ -1062,13 +1062,13 @@ function AgentPortalPage() {
                                                 ) : (
                                                     pagedProducts.map((item) => (
                                                         <tr key={item.productId}>
-                                                            <td>{item.category}</td>
+                                                            {/* <td>{item.category}</td> */}
                                                             <td>{item.productName}</td>
                                                             {/* <td>{item.brand || '-'}</td> */}
                                                             <td>{Number(item.weight || 0).toFixed(2)} kg</td>
                                                             {/* <td>{item.unit}</td> */}
                                                             <td>{currencyFormatter.format(Number(item.unitPrice) || 0)}</td>
-                                                            <td>{item.imageUrl ? 'Có ảnh' : 'Chưa có'}</td>
+                                                            {/* <td>{item.imageUrl ? 'Có ảnh' : 'Chưa có'}</td> */}
                                                             <td>
                                                                 <span className={`status-pill ${item.isActive ? 'active' : 'banned'}`}>
                                                                     {item.isActive ? 'Đang bán' : 'Ngừng bán'}

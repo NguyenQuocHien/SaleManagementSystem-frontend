@@ -16,6 +16,7 @@ const fallbackProductImage = `data:image/svg+xml;utf8,${encodeURIComponent(
 
 function ProductDetailPage() {
     const { productId } = useParams()
+    const decodedProductId = decodeURIComponent(productId || '')
     const [product, setProduct] = useState(null)
     const [status, setStatus] = useState('Đang tải chi tiết sản phẩm...')
 
@@ -23,17 +24,27 @@ function ProductDetailPage() {
         let cancelled = false
 
         async function loadDetail() {
+            if (!decodedProductId) {
+                if (!cancelled) {
+                    setStatus('ID sản phẩm không hợp lệ.')
+                }
+                return
+            }
+
+            console.log('Loading product with ID:', decodedProductId)
+
             try {
-                const detail = await productsApi.getById(productId)
+                const detail = await productsApi.getById(decodedProductId)
+                console.log('Product loaded:', detail)
                 if (!cancelled) {
                     setProduct(detail)
                     setStatus('')
                 }
             } catch (error) {
+                console.error('Error loading product:', error)
                 if (!cancelled) {
-                    setStatus('Không tìm thấy sản phẩm hoặc ID không hợp lệ.')
+                    setStatus(`Không tìm thấy sản phẩm. Lỗi: ${error.message}`)
                 }
-                console.error(error)
             }
         }
 
@@ -41,7 +52,7 @@ function ProductDetailPage() {
         return () => {
             cancelled = true
         }
-    }, [productId])
+    }, [decodedProductId])
 
     if (status) {
         return (

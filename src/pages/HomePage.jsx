@@ -35,6 +35,10 @@ function HomePage() {
             try {
                 const result = await productsApi.getAll()
                 if (!cancelled) {
+                    console.log('Products loaded:', result)
+                    if (result.length > 0) {
+                        console.log('First product ID:', result[0].productId)
+                    }
                     setProducts(result)
                     setStatus('')
                 }
@@ -132,16 +136,16 @@ function HomePage() {
                                     event.currentTarget.src = fallbackProductImage
                                 }}
                             />
-                            <p className="tag">{item.category}</p>
+                            {/* <p className="tag">{item.category}</p> */}
                             <h3>{item.productName}</h3>
-                            <p className="meta-line">{item.brand || 'Thương hiệu đang cập nhật'}</p>
-                            <p className="meta-line">Quy cách: {Number(item.weight || 0).toFixed(2)} kg/{item.unit || 'bao'}</p>
+                            {/* <p className="meta-line">{item.brand || 'Thương hiệu đang cập nhật'}</p> */}
+                            <p className="meta-line">{Number(item.weight || 0).toFixed(2)} kg/{item.unit || 'bao'}</p>
                             <p className="desc">{item.description || 'Sản phẩm chất lượng cao, thông tin đang cập nhật.'}</p>
                             <div className="card-foot">
                                 <strong>{currencyFormatter.format(item.unitPrice)}</strong>
                                 <span>/ {item.unit}</span>
                             </div>
-                            <Link className="detail-link" to={`/products/${encodeURIComponent(item.productId)}`}>
+                            <Link className="detail-link" to={`/products/${item.productId}`}>
                                 Xem chi tiết
                             </Link>
                         </article>

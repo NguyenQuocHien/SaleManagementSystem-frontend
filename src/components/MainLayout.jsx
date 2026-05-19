@@ -83,9 +83,9 @@ function MainLayout() {
                             Logout
                         </button>
                     )}
-                    <a href={`${API_BASE_URL}/swagger`} target="_blank" rel="noreferrer">
+                    {/* <a href={`${API_BASE_URL}/swagger`} target="_blank" rel="noreferrer">
                         Swagger
-                    </a>
+                    </a> */}
                 </nav>
             </header>
 
