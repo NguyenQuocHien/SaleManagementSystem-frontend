@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { API_BASE_URL } from '../config/env.js'
+import { clearAuthToken } from '../api/authApi.js'
 
 function readAuthUser() {
     try {
@@ -39,6 +40,7 @@ function MainLayout() {
 
     const handleLogout = () => {
         localStorage.removeItem('feedflow-auth-user')
+        clearAuthToken()
         window.dispatchEvent(new Event('feedflow-auth-changed'))
         navigate('/login')
     }

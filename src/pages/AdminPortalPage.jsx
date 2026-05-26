@@ -36,6 +36,22 @@ function AdminPortalPage() {
     const [pageNotice, setPageNotice] = useState('')
     const [updatingUserId, setUpdatingUserId] = useState('')
 
+    // Form modal state
+    const [showModal, setShowModal] = useState(false)
+    const [modalMode, setModalMode] = useState('create') // 'create' or 'edit'
+    const [formErrors, setFormErrors] = useState({})
+    const [formData, setFormData] = useState({
+        username: '',
+        password: '',
+        confirmPassword: '',
+        email: '',
+        fullName: '',
+        phone: '',
+        role: '1',
+    })
+    const [editingUserId, setEditingUserId] = useState('')
+    const [isSubmittingForm, setIsSubmittingForm] = useState(false)
+
     const clearMessages = () => {
         setPageError('')
         setPageNotice('')
@@ -133,14 +149,137 @@ function AdminPortalPage() {
         }
     }
 
+    const resetForm = () => {
+        setFormData({
+            username: '',
+            password: '',
+            confirmPassword: '',
+            email: '',
+            fullName: '',
+            phone: '',
+            role: '1',
+        })
+        setFormErrors({})
+    }
+
+    const openCreateModal = () => {
+        setModalMode('create')
+        resetForm()
+        setEditingUserId('')
+        setShowModal(true)
+    }
+
+    const openEditModal = (user) => {
+        setModalMode('edit')
+        setEditingUserId(user.userId)
+        setFormData({
+            username: user.username,
+            password: '',
+            confirmPassword: '',
+            email: user.email,
+            fullName: user.fullName,
+            phone: user.phone,
+            role: String(user.role),
+        })
+        setFormErrors({})
+        setShowModal(true)
+    }
+
+    const closeModal = () => {
+        setShowModal(false)
+        resetForm()
+        setEditingUserId('')
+    }
+
+    const validateForm = () => {
+        const errors = {}
+
+        if (!formData.username.trim()) {
+            errors.username = 'Username không được để trống'
+        }
+
+        if (!formData.email.trim()) {
+            errors.email = 'Email không được để trống'
+        } else if (!formData.email.includes('@')) {
+            errors.email = 'Email không hợp lệ'
+        }
+
+        if (!formData.fullName.trim()) {
+            errors.fullName = 'Họ tên không được để trống'
+        }
+
+        if (!formData.phone.trim()) {
+            errors.phone = 'Số điện thoại không được để trống'
+        }
+
+        if (modalMode === 'create') {
+            if (!formData.password.trim()) {
+                errors.password = 'Mật khẩu không được để trống'
+            } else if (formData.password.length < 6) {
+                errors.password = 'Mật khẩu phải có ít nhất 6 ký tự'
+            }
+
+            if (formData.password !== formData.confirmPassword) {
+                errors.confirmPassword = 'Mật khẩu không khớp'
+            }
+        }
+
+        setFormErrors(errors)
+        return Object.keys(errors).length === 0
+    }
+
+    const handleSubmitForm = async (event) => {
+        event.preventDefault()
+
+        if (!validateForm()) {
+            return
+        }
+
+        clearMessages()
+        setIsSubmittingForm(true)
+
+        try {
+            if (modalMode === 'create') {
+                const payload = {
+                    username: formData.username.trim(),
+                    password: formData.password.trim(),
+                    email: formData.email.trim(),
+                    fullName: formData.fullName.trim(),
+                    phone: formData.phone.trim(),
+                    role: parseInt(formData.role),
+                }
+                await usersApi.create(payload)
+                setPageNotice('Tạo tài khoản thành công.')
+            } else {
+                const payload = {
+                    username: formData.username.trim(),
+                    email: formData.email.trim(),
+                    fullName: formData.fullName.trim(),
+                    phone: formData.phone.trim(),
+                    role: parseInt(formData.role),
+                }
+                if (formData.password.trim()) {
+                    payload.password = formData.password.trim()
+                }
+                await usersApi.update(editingUserId, payload)
+                setPageNotice('Cập nhật tài khoản thành công.')
+            }
+
+            await loadUsers({ preserveMessages: true })
+            closeModal()
+        } catch (error) {
+            setPageError(error?.message || 'Không thể lưu tài khoản.')
+        } finally {
+            setIsSubmittingForm(false)
+        }
+    }
+
     return (
         <section className="agent-shell">
             <div className="agent-head">
-                <p className="eyebrow">Admin Workspace</p>
                 <h1>Dashboard quản trị</h1>
-                <p className="subtitle">Quản lý toàn bộ tài khoản hệ thống, theo dõi trạng thái và khóa/mở khóa tài khoản trực tiếp.</p>
                 <div className="agent-head-actions">
-                    <button type="button" className="action-btn" onClick={() => loadUsers()}>Làm mới dữ liệu</button>
+                    <button type="button" className="action-btn" onClick={openCreateModal} style={{ marginLeft: '8px', backgroundColor: '#4CAF50' }}>+ Tạo tài khoản</button>
                 </div>
             </div>
 
@@ -230,18 +369,30 @@ function AdminPortalPage() {
                                                 </td>
                                                 <td>{formatDate(user.createdDate)}</td>
                                                 <td>
-                                                    <button
-                                                        type="button"
-                                                        className={`mini-btn ${user.isActive ? 'danger' : ''}`}
-                                                        onClick={() => handleToggleStatus(user)}
-                                                        disabled={updatingUserId === user.userId}
-                                                    >
-                                                        {updatingUserId === user.userId
-                                                            ? 'Đang xử lý...'
-                                                            : user.isActive
-                                                                ? 'Khóa tài khoản'
-                                                                : 'Mở khóa'}
-                                                    </button>
+                                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                                        <button
+                                                            type="button"
+                                                            className="mini-btn"
+                                                            onClick={() => openEditModal(user)}
+                                                            disabled={updatingUserId === user.userId}
+                                                            style={{ fontSize: '12px', padding: '4px 8px' }}
+                                                        >
+                                                            Sửa
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            className={`mini-btn ${user.isActive ? 'danger' : ''}`}
+                                                            onClick={() => handleToggleStatus(user)}
+                                                            disabled={updatingUserId === user.userId}
+                                                            style={{ fontSize: '12px', padding: '4px 8px' }}
+                                                        >
+                                                            {updatingUserId === user.userId
+                                                                ? 'Đang xử lý...'
+                                                                : user.isActive
+                                                                    ? 'Khóa'
+                                                                    : 'Mở khóa'}
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))
@@ -251,6 +402,142 @@ function AdminPortalPage() {
                         </div>
                     </div>
                 </>
+            ) : null}
+
+            {/* Modal Form */}
+            {showModal ? (
+                <div className="modal-overlay" onClick={closeModal}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h2>{modalMode === 'create' ? 'Tạo tài khoản mới' : 'Sửa thông tin tài khoản'}</h2>
+                            <button className="modal-close" onClick={closeModal}>×</button>
+                        </div>
+
+                        <form onSubmit={handleSubmitForm} className="modal-form">
+                            {formErrors.general && (
+                                <p className="form-error">{formErrors.general}</p>
+                            )}
+
+                            <div className="form-group">
+                                <label htmlFor="username">Username *</label>
+                                <input
+                                    id="username"
+                                    type="text"
+                                    value={formData.username}
+                                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                    className={formErrors.username ? 'error' : ''}
+                                    disabled={isSubmittingForm || modalMode === 'edit'}
+                                />
+                                {formErrors.username && <p className="field-error">{formErrors.username}</p>}
+                            </div>
+
+                            {modalMode === 'create' ? (
+                                <>
+                                    <div className="form-group">
+                                        <label htmlFor="password">Mật khẩu *</label>
+                                        <input
+                                            id="password"
+                                            type="password"
+                                            value={formData.password}
+                                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                            className={formErrors.password ? 'error' : ''}
+                                            disabled={isSubmittingForm}
+                                        />
+                                        {formErrors.password && <p className="field-error">{formErrors.password}</p>}
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label htmlFor="confirmPassword">Xác nhận mật khẩu *</label>
+                                        <input
+                                            id="confirmPassword"
+                                            type="password"
+                                            value={formData.confirmPassword}
+                                            onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                                            className={formErrors.confirmPassword ? 'error' : ''}
+                                            disabled={isSubmittingForm}
+                                        />
+                                        {formErrors.confirmPassword && <p className="field-error">{formErrors.confirmPassword}</p>}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="form-group">
+                                    <label htmlFor="password">Mật khẩu mới (để trống nếu không thay đổi)</label>
+                                    <input
+                                        id="password"
+                                        type="password"
+                                        value={formData.password}
+                                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                        className={formErrors.password ? 'error' : ''}
+                                        disabled={isSubmittingForm}
+                                    />
+                                    {formErrors.password && <p className="field-error">{formErrors.password}</p>}
+                                </div>
+                            )}
+
+                            <div className="form-group">
+                                <label htmlFor="email">Email *</label>
+                                <input
+                                    id="email"
+                                    type="email"
+                                    value={formData.email}
+                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                    className={formErrors.email ? 'error' : ''}
+                                    disabled={isSubmittingForm}
+                                />
+                                {formErrors.email && <p className="field-error">{formErrors.email}</p>}
+                            </div>
+
+                            <div className="form-group">
+                                <label htmlFor="fullName">Họ tên *</label>
+                                <input
+                                    id="fullName"
+                                    type="text"
+                                    value={formData.fullName}
+                                    onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                                    className={formErrors.fullName ? 'error' : ''}
+                                    disabled={isSubmittingForm}
+                                />
+                                {formErrors.fullName && <p className="field-error">{formErrors.fullName}</p>}
+                            </div>
+
+                            <div className="form-group">
+                                <label htmlFor="phone">Số điện thoại *</label>
+                                <input
+                                    id="phone"
+                                    type="tel"
+                                    value={formData.phone}
+                                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                    className={formErrors.phone ? 'error' : ''}
+                                    disabled={isSubmittingForm}
+                                />
+                                {formErrors.phone && <p className="field-error">{formErrors.phone}</p>}
+                            </div>
+
+                            <div className="form-group">
+                                <label htmlFor="role">Vai trò *</label>
+                                <select
+                                    id="role"
+                                    value={formData.role}
+                                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                    disabled={isSubmittingForm}
+                                >
+                                    <option value="1">Agent</option>
+                                    <option value="2">Staff</option>
+                                    <option value="3">User</option>
+                                </select>
+                            </div>
+
+                            <div className="modal-actions">
+                                <button type="button" className="btn-secondary" onClick={closeModal} disabled={isSubmittingForm}>
+                                    Hủy
+                                </button>
+                                <button type="submit" className="btn-primary" disabled={isSubmittingForm}>
+                                    {isSubmittingForm ? 'Đang xử lý...' : modalMode === 'create' ? 'Tạo tài khoản' : 'Cập nhật'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             ) : null}
         </section>
     )

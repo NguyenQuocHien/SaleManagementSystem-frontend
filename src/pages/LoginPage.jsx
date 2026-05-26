@@ -31,6 +31,7 @@ function LoginPage() {
             const role = response?.user?.role
             if (response?.user) {
                 localStorage.setItem('feedflow-auth-user', JSON.stringify(response.user))
+                // Token is saved by authApi.loginByPhone
                 window.dispatchEvent(new Event('feedflow-auth-changed'))
             }
             setNotice('Đăng nhập thành công. Đang chuyển trang...')

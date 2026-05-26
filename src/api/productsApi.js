@@ -29,6 +29,8 @@ function extractErrorMessage(rawPayload, fallback) {
     return trimmed.replace(/^"|"$/g, '')
 }
 
+import { getAuthToken } from './authApi.js'
+
 async function parseResponse(response) {
     const responseText = await response.text()
 
@@ -88,12 +90,20 @@ export function createProductsApi(apiBaseUrl) {
         },
 
         async create(payload) {
+            const token = getAuthToken()
+            const headers = {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+            }
+            
+            // Add JWT token if available
+            if (token) {
+                headers.Authorization = `Bearer ${token}`
+            }
+            
             const response = await fetch(`${apiBaseUrl}/api/Products`, {
                 method: 'POST',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                },
+                headers,
                 body: JSON.stringify(payload),
             })
 
@@ -101,12 +111,19 @@ export function createProductsApi(apiBaseUrl) {
         },
 
         async update(productId, payload) {
+            const token = getAuthToken()
+            const headers = {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+            }
+            
+            if (token) {
+                headers.Authorization = `Bearer ${token}`
+            }
+            
             const response = await fetch(`${apiBaseUrl}/api/Products/${productId}`, {
                 method: 'PUT',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                },
+                headers,
                 body: JSON.stringify(payload),
             })
 
@@ -114,9 +131,16 @@ export function createProductsApi(apiBaseUrl) {
         },
 
         async remove(productId) {
+            const token = getAuthToken()
+            const headers = { Accept: 'application/json' }
+            
+            if (token) {
+                headers.Authorization = `Bearer ${token}`
+            }
+            
             const response = await fetch(`${apiBaseUrl}/api/Products/${productId}`, {
                 method: 'DELETE',
-                headers: { Accept: 'application/json' },
+                headers,
             })
 
             if (response.status !== 204 && !response.ok) {
